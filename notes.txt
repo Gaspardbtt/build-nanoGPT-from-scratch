@@ -1,0 +1,3 @@
+https://jalammar.github.io/illustrated-transformer/        -->transformers lecture
+
+https://transformer-circuits.pub/2021/framework/index.html
