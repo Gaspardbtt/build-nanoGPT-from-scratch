@@ -145,7 +145,7 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
 
-    def forward(self, idx):
+    def forward(self, idx, targets=None):
         # idx is the shape (B, T)
         B, T = idx.size()
         assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is only {self.config.block_size}"
@@ -160,7 +160,10 @@ class GPT(nn.Module):
         # forward the final layernorm and the classifier 
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x) # (B, T, vocab_size)
-        return logits
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
 
 
 
@@ -226,20 +229,57 @@ class GPT(nn.Module):
 #-----------------------------------------------------------------------------------------------------------------------
 
 
+
+
+
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+
+
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+print(f"using device: {device}")
+
+
+import tiktoken
+enc = tiktoken.get_encoding('gpt2')
+with open('input.txt', 'r') as f:
+    text = f.read()
+text = text[:1000]
+tokens = enc.encode(text)
+B, T = 4, 32 
+buf = torch.tensor(tokens[:B*T + 1])
+buf = buf.to(device)
+x = buf[:-1].view(B, T)
+y = buf[1:].view(B, T)
+
+# get logits
+model = GPT(GPTConfig())
+model.to(device)  # Envoi du modèle sur l'appareil sélectionné
+#logits, loss = model(x, y)
+
+
+# Optimize!!
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+for i in range(50):
+    optimizer.zero_grad()
+    logits, loss = model(x, y)
+    loss.backward()
+    optimizer.step()
+    print(f"step {i}, loss: {loss.item()}")
+
+
+
+
+import sys; sys.exit(0)
+
+# prefix tokens
 num_return_sequences = 5
 max_length = 30
 
 
-# Détecter l'appareil disponible
-#device = "cuda" if torch.cuda.is_available() else "cpu"
-device = "cuda"
-model = GPT.from_pretrained('gpt2')
-model.eval()
-model.to(device)  # Envoi du modèle sur l'appareil sélectionné
-
-
-# prefix tokens
-import tiktoken
 enc = tiktoken.get_encoding('gpt2')
 tokens = enc.encode("Hello, I'm a language model,")
 tokens = torch.tensor(tokens,dtype=torch.long)   #(8,)
