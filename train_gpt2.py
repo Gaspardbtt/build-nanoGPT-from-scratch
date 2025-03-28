@@ -293,12 +293,13 @@ torch.manual_seed(13337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(13337)
 # B=16 and T=256 for my GPU or it will blow up (T4 on Colab)
-train_loader = DataLoaderLite(B=16, T=1024)
+train_loader = DataLoaderLite(B=16, T=256)
 
 torch.set_float32_matmul_precision('high')   # 'hight' --> matrice dot precision will be TensorFloat32 :) 
 # get logits
 model = GPT(GPTConfig())
-model.to(device)  # Envoi du modèle sur l'appareil sélectionné
+model.to(device)# Envoi du modèle sur l'appareil sélectionné
+model = torch.compile(model)
 #logits, loss = model(x, y)
 
 
@@ -309,7 +310,8 @@ for i in range(50):
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device) 
     optimizer.zero_grad()
-    logits, loss = model(x, y)
+    with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        logits, loss = model(x, y)
     loss.backward()
     optimizer.step()
     torch.cuda.synchronize()
