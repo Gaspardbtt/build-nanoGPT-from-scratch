@@ -44,7 +44,11 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        
+        
+        
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True) # flash attention
+        
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)
@@ -293,7 +297,7 @@ torch.manual_seed(13337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(13337)
 # B=16 and T=256 for my GPU or it will blow up (T4 on Colab)
-train_loader = DataLoaderLite(B=16, T=256)
+train_loader = DataLoaderLite(B=5, T=32)
 
 torch.set_float32_matmul_precision('high')   # 'hight' --> matrice dot precision will be TensorFloat32 :) 
 # get logits
