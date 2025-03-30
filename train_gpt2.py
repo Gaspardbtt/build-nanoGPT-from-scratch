@@ -308,8 +308,8 @@ model = torch.compile(model)
 
 
 # Optimize!!
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-for i in range(50):
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.95), eps=1e-8)
+for step in range(max_steps):
     t0 = time.time()
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device) 
@@ -317,12 +317,16 @@ for i in range(50):
     with torch.autocast(device_type=device, dtype=torch.bfloat16):
         logits, loss = model(x, y)
     loss.backward()
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    lr = get_lr(step)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
     optimizer.step()
     torch.cuda.synchronize()
     t1 = time.time()
     dt = (t1-t0)*1000  #time diff en ms 
     tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
-    print(f"step {i}, loss: {loss.item()}, dt: {dt:.2f} ms, tok/sec: {tokens_per_sec:.2f}")
+    print(f"step {i}, loss: {loss.item()}, lr {lr:.4e}, norm: {norm:.4f}, dt: {dt:.2f} ms, tok/sec: {tokens_per_sec:.2f}")
 
 
 
