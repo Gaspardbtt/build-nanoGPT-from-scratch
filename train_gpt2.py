@@ -301,7 +301,7 @@ train_loader = DataLoaderLite(B=5, T=32)
 
 torch.set_float32_matmul_precision('high')   # 'hight' --> matrice dot precision will be TensorFloat32 :) 
 # get logits
-model = GPT(GPTConfig())
+model = GPT(GPTConfig(vocab_size=50304))
 model.to(device)# Envoi du modèle sur l'appareil sélectionné
 model = torch.compile(model)
 #logits, loss = model(x, y)
