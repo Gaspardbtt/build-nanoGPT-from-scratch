@@ -10,16 +10,6 @@ from torch.nn import functional as F
 
 #-----------------------------------------------------------------------------------------------------------------------
 
-
-# La classe CausalSelfAttention : 
-
-# Implémente un mécanisme d'attention causale multi-têtes pour un modèle Transformer.  
-# La classe projette l'entrée en queries, keys et values, applique une attention avec  
-# un masque pour empêcher les tokens de voir le futur (causalité), puis combine les  
-# résultats des différentes têtes avant de les projeter à nouveau. Cela permet au  
-# modèle de capturer des dépendances contextuelles tout en maintenant un traitement  
-# séquentiel adapté aux tâches de génération de texte.
-
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
@@ -55,15 +45,6 @@ class CausalSelfAttention(nn.Module):
         return y  
     
 
-
-
-# La classe MLP :
-# Cette classe définit un Perceptron Multicouche (MLP) avec deux couches linéaires (fully connected).
-# - La première couche (c_fc) transforme l'entrée de taille `config.n_embd` à `4 * config.n_embd`.
-# - Une fonction d'activation GELU est appliquée à la sortie de la première couche.
-# - La deuxième couche (c_proj) réduit la sortie de `4 * config.n_embd` à `config.n_embd`.
-# Ce MLP est utilisé pour appliquer des transformations non linéaires aux embeddings dans un modèle de type Transformer.
-
 class MLP(nn.Module):
     def __init__(self,config):
         super().__init__()
@@ -78,15 +59,6 @@ class MLP(nn.Module):
         x = self.c_proj(x)
         return x
 
-
-# La classe Block : 
-# Ce bloc est une unité de base d'un Transformer (comme GPT).  
-# Il applique :  
-# 1. Une normalisation (LayerNorm)  
-# 2. Une auto-attention causale avec connexion résiduelle  
-# 3. Une deuxième normalisation  
-# 4. Une MLP avec connexion résiduelle  
-# Ces connexions résiduelles stabilisent l'entraînement et facilitent l'apprentissage.
 
 class Block(nn.Module):
 
@@ -103,15 +75,6 @@ class Block(nn.Module):
         return x
 
 
-
-
-#La classe GPTConfig est un dataclass qui stocke les paramètres de configuration du modèle :
-#	•	block_size : Taille du contexte (longueur maximale d’une séquence d’entrée).
-#	•	vocab_size : Nombre de tokens dans le vocabulaire (65 ici, ce qui est très petit, probablement pour un jeu de caractères ASCII).
-#	•	n_layer : Nombre de couches de blocs Transformer.
-#	•	n_head : Nombre de têtes dans l’attention multi-tête.
-#	•	n_embd : Dimension des embeddings (taille des vecteurs d’entrée dans le modèle).
-
 @dataclass
 class GPTConfig:
     block_size: int = 1024               
@@ -120,19 +83,6 @@ class GPTConfig:
     n_head: int =12
     n_embd: int = 768
 
-
-
-# Classe GPT
-# La classe GPT est un modèle basé sur les Transformers. Elle hérite de nn.Module et s’initialise avec la configuration config.
-
-# a. Initialisation (__init__)
-# 	•	self.config = config : Stocke la configuration du modèle.
-# 	•	self.transformers est un ModuleDict contenant plusieurs sous-couches du Transformer :
-# 	•	wte : Embedding pour les tokens (convertit les tokens en vecteurs denses).
-# 	•	wpe : Embedding pour les positions (ajoute des informations de position à la séquence).
-# 	•	h : Liste de Block(config), qui représentent les couches du Transformer (non définies ici mais probablement des blocs contenant des mécanismes d’attention et des MLP).
-# 	•	ln_f : Normalisation LayerNorm à la fin du modèle.
-# 	•	self.lm_head : Couche linéaire finale qui projette la sortie du Transformer vers l’espace du vocabulaire pour la prédiction des tokens suivants.
 
 
 class GPT(nn.Module):
@@ -189,15 +139,6 @@ class GPT(nn.Module):
         return logits, loss
 
 
-
-
-# La methode from_pretrained : 
-# Charge un modèle GPT-2 pré-entraîné depuis Hugging Face et transfère ses poids  
-# vers une implémentation personnalisée (GPT). Vérifie le type de modèle choisi,  
-# initialise un modèle équivalent avec les bons paramètres, récupère les poids  
-# depuis Hugging Face, adapte les différences de format (notamment pour les couches  
-# de projection), et copie les poids dans le modèle personnalisé avant de le retourner.  
-       
     @classmethod
     def from_pretrained(cls, model_type):
         """Charge les modèles pre-entrainés GPT-2 depuis huggingface"""
@@ -248,7 +189,28 @@ class GPT(nn.Module):
         return model
     
 
-
+    def configure_optimizers(self, weight_decay, learning_rate, device):
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+        nodedecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': nodedecay_params, 'weight_decay': 0.0}
+        ]
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nodedecay_params = sum(p.numel() for p in nodedecay_params)
+        print(f"num decayed parameters tensors : {len(decay_params)}, with : {num_decay_params} parameters")
+        print(f"num non-decayed parameters tensors : {len(nodedecay_params)}, with : {num_nodedecay_params} parameters")
+        # create AdamW optimizer and use the fused version if it is available 
+        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and 'cuda' in device
+        print(f"using fused AdamW: {use_fused}")
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
+        return optimizer
+    
+    
 #-----------------------------------------------------------------------------------------------------------------------
 
 import tiktoken 
@@ -307,8 +269,28 @@ model = torch.compile(model)
 #logits, loss = model(x, y)
 
 
+max_lr = 6e-4
+min_lr = max_lr * 0.1 
+warmup_steps = 10
+max_steps = 50
+def get_lr(it):
+    #1) linear warmup for warmup_iters steps
+    if it < warmup_steps:
+        return max_lr * (it + 1) / warmup_steps
+    if it > max_steps:
+        return min_lr
+    decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1 + math.cos(math.pi * decay_ratio))
+    return min_lr + coeff * (max_lr - min_lr)
+
+
+
 # Optimize!!
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.95), eps=1e-8)
+
+#optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.95), eps=1e-8)
+optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, divice=device)
+
 for step in range(max_steps):
     t0 = time.time()
     x, y = train_loader.next_batch()
