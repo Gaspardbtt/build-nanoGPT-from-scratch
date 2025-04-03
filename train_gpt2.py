@@ -216,9 +216,12 @@ class GPT(nn.Module):
 import tiktoken 
 
 class DataLoaderLite:
-    def __init__(self, B, T):
+    def __init__(self, B, T, process_rank, num_processes):
         self.B = B
         self.T = T
+        self.process_rank = process_rank
+        self.num_processes = num_processes
+
         
         # at init load tokens form disk and store them in memory for future training :) 
         with open('input.txt', 'r') as f:
@@ -230,7 +233,7 @@ class DataLoaderLite:
         print(f"1 epoch = {len(self.tokens) // (B*T)} batches")
 
         # state 
-        self.current_position=0
+        self.current_position= self.B * self.T * self.process_rank
 
     def next_batch(self):
         B, T = self.B, self.T
@@ -238,9 +241,9 @@ class DataLoaderLite:
         x = (buf[:-1].view(B, T))  # inputs 
         y = (buf[1:].view(B, T))   # targets
         # advance the position in the tensor
-        self.current_position += B*T
-        if self.current_position + (B*T + 1) > len(self.tokens):
-            self.current_position = 0
+        self.current_position += B * T * self.num_processes
+        if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens):
+            self.current_position= self.B * self.T * self.process_rank
         return x, y
 
 
@@ -248,26 +251,65 @@ class DataLoaderLite:
 #-----------------------------------------------------------------------------------------------------------------------
 
 import time
+from torch.distributed import init_process_group, destroy_process_group
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.distributed as dist
+# sett DDP ( distributed data parallel)
 
-device = "cpu"
-if torch.cuda.is_available():
-    device = "cuda"
-print(f"using device: {device}")
-
+ddp = int(os.environ.get('RANK', -1)) != -1
+if ddp :
+    # use of DDP atm demands CUDA, we set the device appropriatly according to rank
+    assert torch.cuda.is_available(), "for now i think we need CUDA for DDP"
+    init_process_group(backend='nccl')
+    ddp_rank = int(os.environ['RANK'])
+    ddp_local_rank = int(os.eniron['LOCAL_RANK'])
+    ddp_world_size = int(os.eniron['WORLD_SIZE'])
+    device = f'cuda:{ddp_local_rank}'
+    torch.cuda.set_device(device)
+    master_process = ddp_rank == 0 # checkpoint
+else :
+    # vanilla, non ddp run
+    ddp_rank = 0
+    ddp_local_rank = 0
+    ddp_world_size = 1
+    master_process = True 
+    # attempt autodecte device 
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device = "mps"
+    print(f"using device: {device}")
 
 torch.manual_seed(13337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(13337)
-# B=16 and T=256 for my GPU or it will blow up (T4 on Colab)
-train_loader = DataLoaderLite(B=5, T=32)
+
+total_batch_size = 524288  # 2**19, 0.5M in number of tokens 
+B = 16 # micro batch size
+T = 1024 # sequence length 
+assert total_batch_size % (B * T * ddp_world_size) == 0 # make sure total_batch_Size is divisible by B * T * ddp_world_size
+grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
+if master_process:
+    print(f"total desired batch size: {total_batch_size}")
+    print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
+
+print("A am GPU ", ddp_rank)
+print("bye")
+
+
+
+train_loader = DataLoaderLite(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size)
 
 torch.set_float32_matmul_precision('high')   # 'hight' --> matrice dot precision will be TensorFloat32 :) 
-# get logits
+
+# create model 
 model = GPT(GPTConfig(vocab_size=50304))
 model.to(device)# Envoi du modèle sur l'appareil sélectionné
 model = torch.compile(model)
-#logits, loss = model(x, y)
-
+if ddp:
+    model = DDP(model, device_ids=[ddp_local_rank])
+raw_model = model.module if ddp else model # always contains the "raw" unrwaped model
 
 max_lr = 6e-4
 min_lr = max_lr * 0.1 
@@ -289,16 +331,25 @@ def get_lr(it):
 # Optimize!!
 
 #optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.95), eps=1e-8)
-optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, divice=device)
+optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
 for step in range(max_steps):
     t0 = time.time()
-    x, y = train_loader.next_batch()
-    x, y = x.to(device), y.to(device) 
     optimizer.zero_grad()
-    with torch.autocast(device_type=device, dtype=torch.bfloat16):
-        logits, loss = model(x, y)
-    loss.backward()
+    loss_accum = 0.0
+    for microstep in range(grad_accum_steps):
+            
+        x, y = train_loader.next_batch()
+        x, y = x.to(device), y.to(device) 
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            logits, loss = model(x, y)
+        loss = loss / grad_accum_steps
+        loss_accum += loss.detach()
+        if ddp:     # to avoid sync at each steps, we only want to sync at the last step :) 
+            model.require_backward_grad_sync = (microstep == grad_accum_steps - 1)
+        loss.backward()
+    if ddp:
+        dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     lr = get_lr(step)
     for param_group in optimizer.param_groups:
@@ -307,9 +358,13 @@ for step in range(max_steps):
     torch.cuda.synchronize()
     t1 = time.time()
     dt = (t1-t0)*1000  #time diff en ms 
-    tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
-    print(f"step {i}, loss: {loss.item()}, lr {lr:.4e}, norm: {norm:.4f}, dt: {dt:.2f} ms, tok/sec: {tokens_per_sec:.2f}")
+    tokens_processed = (train_loader.B * train_loader.T) * grad_accum_steps * ddp_world_size
+    tokens_per_sec = tokens_processed / (t1 - t0)
+    if master_process:
+        print(f"step {step:4d}, loss: {loss_accum.item()}, lr {lr:.4e}, norm: {norm:.4f}, dt: {dt:.2f} ms, tok/sec: {tokens_per_sec:.2f}")
 
+if ddp:
+    destroy_process_group()
 
 
 
@@ -360,3 +415,18 @@ for i in range(num_return_sequences):
 
 
 
+# DDP : 
+# Une moyenne des gradients est effectuée lors de l’entraînement avec DistributedDataParallel (DDP).
+# Cela permet à tous les GPU d’apprendre le même modèle globalement.
+
+# Synchronisation des gradients en DDP :
+# 1. Chaque GPU calcule ses propres gradients :
+#    - Traite un mini-batch différent et effectue un forward + backward pass.
+#    - Obtient donc ses propres gradients basés uniquement sur ses données.
+# 2. Les gradients sont moyennés entre tous les GPU :
+#    - PyTorch utilise All-Reduce (algorithme de communication distribué).
+#    - Tous les GPU partagent leurs gradients et la moyenne est calculée.
+#    - Ainsi, chaque GPU reçoit les mêmes gradients globaux.
+# 3. Chaque GPU met à jour son modèle avec ces gradients synchronisés :
+#    - Tous appliquent les mêmes mises à jour de poids.
+#    - Ils restent parfaitement synchronisés après chaque itération.
