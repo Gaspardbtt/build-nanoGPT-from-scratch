@@ -1,4 +1,4 @@
-# nanoGPT: Building a Language Model from Scratch
+# nanoGPT: Building a Language Model from Scratch (OnGoing) 
 
 This repository contains my implementation of **nanoGPT**, inspired by Andrej Karpathy's YouTube tutorial: [Build nanoGPT](https://www.youtube.com/watch?v=l8pRSuU81PU&t=2150s). The objective is to construct the **GPT-2 (124M)** model from the ground up, starting with an empty file and progressively adding the necessary components.
 
