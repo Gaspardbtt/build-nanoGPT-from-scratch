@@ -1,4 +1,4 @@
-# nanoGPT: Building a Language Model from Scratch (OnGoing) 
+# nanoGPT: Building a Language Model from Scratch
 
 This repository contains my implementation of **nanoGPT**, inspired by Andrej Karpathy's YouTube tutorial: [Build nanoGPT](https://www.youtube.com/watch?v=l8pRSuU81PU&t=2150s). The objective is to construct the **GPT-2 (124M)** model from the ground up, starting with an empty file and progressively adding the necessary components.
 
@@ -8,7 +8,7 @@ In this project, we begin with an empty file and incrementally implement the com
 
 ## Requirements
 
-- **GPU**: Cloud GPU (recommended: **Lambda**)
+- **GPU**: Cloud GPU (recommended: **LambdaAI** (8xA100 GPU config))
 - **Time**: Approximately 1 hour for GPT-2 (124M)
 
 ## Key Features
