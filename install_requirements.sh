@@ -8,7 +8,6 @@ pip install --upgrade pip
 echo "Installation des bibliothèques nécessaires..."
 
 pip install torch torchvision torchaudio
-pip install hellaswag
 pip install tiktoken
 pip install numpy
 pip install torchdistributed
@@ -16,7 +15,7 @@ pip install torchdistributed
 # Vérifier si les bibliothèques sont installées correctement
 echo "Vérification de l'installation des bibliothèques..."
 
-python -c "import torch; import hellaswag; import tiktoken; import numpy; import torch.distributed as dist; print('Tous les packages sont installés correctement')"
+python -c "import torch; import tiktoken; import numpy; import torch.distributed as dist; print('Tous les packages sont installés correctement')"
 
 echo "Installation terminée."
 
