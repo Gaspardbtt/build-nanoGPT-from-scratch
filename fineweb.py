@@ -6,7 +6,10 @@ from tqdm import tqdm
 from datasets import load_dataset
 from google.colab import drive
 
-# Monter Google Drive pour accéder à l'espace de stockage
+
+#-> # Pour Google Colab
+# """ # Si vous utilisez Google Colab, décommentez cette section
+""" # Monter Google Drive pour accéder à l'espace de stockage
 drive.mount('/content/drive')
 
 # Définir un répertoire dans Google Drive pour stocker les données
@@ -15,7 +18,19 @@ remote_name = "sample-10BT"
 shard_size = int(1e8)  # 100M tokens per shard, total of 100 shards
 
 # Créer le répertoire local s'il n'existe pas encore
-os.makedirs(local_dir, exist_ok=True)
+os.makedirs(local_dir, exist_ok=True) """
+
+#-> # Pour un environnement local
+# """ # Si vous utilisez un environnement local, décommentez cette section
+#-----------------------------------------------------------------------------------------------
+local_dir = "edu_fineweb10B"
+remote_name = "sample-10BT"
+shard_size = int(1e8) # 100M tokens per shard, total of 100 shards
+
+# create the cache the local directory if it doesn't exist yet
+DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), local_dir)
+os.makedirs(DATA_CACHE_DIR, exist_ok=True)
+
 
 # Télécharger le dataset
 
