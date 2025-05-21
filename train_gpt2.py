@@ -204,9 +204,14 @@ class GPT(nn.Module):
         num_nodedecay_params = sum(p.numel() for p in nodedecay_params)
         print(f"num decayed parameters tensors : {len(decay_params)}, with : {num_decay_params} parameters")
         print(f"num non-decayed parameters tensors : {len(nodedecay_params)}, with : {num_nodedecay_params} parameters")
+        if master_process:
+            print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+            print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
         # create AdamW optimizer and use the fused version if it is available 
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and 'cuda' in device
+        if master_process:
+            print(f"using fused AdamW: {use_fused}")
         print(f"using fused AdamW: {use_fused}")
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
         return optimizer
@@ -337,7 +342,7 @@ enc = tiktoken.get_encoding("gpt2")
 
 total_batch_size = 524288  # 2**19, 0.5M in number of tokens 
 B = 16 # micro batch size
-T = 1024 # sequence length 
+T = 512 # sequence length 
 assert total_batch_size % (B * T * ddp_world_size) == 0 # make sure total_batch_Size is divisible by B * T * ddp_world_size
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size)
 if master_process:
@@ -379,8 +384,6 @@ def get_lr(it):
 
 
 # Optimize!!
-
-#optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.95), eps=1e-8)
 optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
 # create the log directory we will write checkpoints to and log to
